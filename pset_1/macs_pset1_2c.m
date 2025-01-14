@@ -1,28 +1,3 @@
-% Define parameters
-bbeta = 0.95;
-siga = linspace(0.1, 2, 100);
-sigb = linspace(0.1, 2, 100);
-rs = zeros(100, 100);
-
-% Define the function for solving
-% for i = 1:100
-%     for j = 1:100
-%         f = @(r) (1 - 2 * (bbeta * (1 + r))^(-1 / siga(i))) / ...
-%                  (1 + (1 + r) * (bbeta * (1 + r))^(-1 / siga(i))) + ...
-%                  (1 - 2 * (bbeta * (1 + r))^(-1 / sigb(j))) / ...
-%                  (1 + (1 + r) * (bbeta * (1 + r))^(-1 / sigb(j)));
-% 
-%         % Solve the equation using fzero
-%         [r_solution, exitflag] = fzero(f, 0); % Initial guess is 0
-%         if exitflag > 0
-%             rs(i, j) = r_solution;
-%         else
-%             rs(i, j) = NaN; % Handle cases where the solver fails
-%         end
-%     end
-% end
-
-
 % Parameters
 beta = 0.95;                      % Discount factor
 sigma_a = linspace(0.1, 2, 100);  % Grid for sigma_a
@@ -42,22 +17,28 @@ for i = 1:length(sigma_a)
         sa = sigma_a(i);
         sb = sigma_b(j);
 
+        % Dynamically update initial guess for r
+        r_initial_guess = 0.05; % Default initial guess
+        if i > 1 && j > 1
+            r_initial_guess = r_values(i-1, j); % Use prior result as guess
+        end
+
         % Define equilibrium function
-        eq_func = @(r) ...
-            compute_equilibrium_r(r, beta, sa, sb, y0, y1);
+        eq_func = @(r) compute_equilibrium_r(r, beta, sa, sb, y0, y1);
 
         % Solve for r using fsolve
         try
-            r_values(i, j) = fsolve(eq_func, 0.05, optimset('Display', 'off', 'TolFun', tol));
-            
+            r_values(i, j) = fsolve(eq_func, r_initial_guess, optimset('Display', 'off', 'TolFun', tol));
+
             % Compute b_a and b_b
             b_a(i, j) = compute_b_a(r_values(i, j), beta, sa, y0, y1);
             b_b(i, j) = -b_a(i, j); % Market clearing condition
-            
-            % Check for validity
-            if ~isreal(b_a(i, j)) || ~isreal(b_b(i, j))
+
+            % Check for feasibility and validity
+            if ~isreal(b_a(i, j)) || ~isreal(b_b(i, j)) || b_a(i, j) < -y0 || b_a(i, j) > y0
                 b_a(i, j) = NaN;
                 b_b(i, j) = NaN;
+                r_values(i, j) = NaN;
             end
         catch
             % Handle failed cases
@@ -113,5 +94,18 @@ function b_a = compute_b_a(r, beta, sigma, y0, y1)
     % Solve FOC for type a
     eq_b = @(b) (y0 - b)^(-sigma) - beta * (1 + r) * (y1 + b * (1 + r))^(-sigma);
     b_guess = 0; % Initial guess for b_a
+    
+    % Solve for b_a using fsolve
     b_a = fsolve(eq_b, b_guess, optimset('Display', 'off'));
+
+    % Ensure feasibility of bond holdings
+    % Bond holdings must be within bounds [-y0, y0]
+    if ~isreal(b_a) || b_a < -y0 || b_a > y0
+        error('Bond holdings are infeasible or not real.');
+    end
+
+    % Comment: 
+    % 1. This function computes the bond holdings for type a individuals given the interest rate r.
+    % 2. It solves the first-order condition (FOC) derived from the optimization problem.
+    % 3. Feasibility checks ensure b_a remains within the economic bounds of the problem.
 end
